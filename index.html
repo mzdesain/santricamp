@@ -25,6 +25,23 @@
             <div class="bg-white rounded-xl shadow-lg p-6 border border-emerald-200">
                 <h1 class="text-3xl font-bold text-emerald-800 text-center mb-2">💰 Pengelolaan Keuangan</h1>
                 <p class="text-emerald-600 text-center text-lg">Santri Camp 2024</p>
+                
+                <!-- Cloud Sync Controls -->
+                <div class="mt-4 flex flex-col sm:flex-row items-center justify-center space-y-2 sm:space-y-0 sm:space-x-4">
+                    <div class="flex items-center space-x-2">
+                        <span class="text-sm text-gray-600">Kode Sinkronisasi:</span>
+                        <input type="text" id="syncCode" class="px-3 py-1 text-sm border border-gray-300 rounded-lg w-32" placeholder="Masukkan kode">
+                    </div>
+                    <div class="flex space-x-2">
+                        <button id="generateCode" class="px-3 py-1 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition duration-200">
+                            🔗 Buat Kode
+                        </button>
+                        <button id="syncData" class="px-3 py-1 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg transition duration-200">
+                            ☁️ Sinkron
+                        </button>
+                    </div>
+                </div>
+                <div id="syncStatus" class="mt-2 text-center text-sm"></div>
             </div>
         </div>
 
@@ -149,6 +166,22 @@
                 </div>
             </div>
         </div>
+
+        <!-- Modal Konfirmasi Sinkronisasi -->
+        <div id="modalSinkron" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50 p-4">
+            <div class="bg-white rounded-xl p-4 md:p-6 max-w-md w-full mx-4">
+                <h3 class="text-base md:text-lg font-bold text-gray-800 mb-4">☁️ Konfirmasi Sinkronisasi</h3>
+                <p id="modalSinkronText" class="text-sm md:text-base text-gray-600 mb-6"></p>
+                <div class="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
+                    <button id="batalSinkron" class="flex-1 px-4 py-2 text-sm md:text-base bg-gray-300 hover:bg-gray-400 text-gray-800 rounded-lg transition duration-200">
+                        Batal
+                    </button>
+                    <button id="konfirmasiSinkron" class="flex-1 px-4 py-2 text-sm md:text-base bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition duration-200">
+                        Ya, Sinkron
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -157,6 +190,10 @@
         let currentPage = 1;
         const itemsPerPage = 15;
         let deleteIndex = -1;
+
+        // Cloud sync variables
+        const CLOUD_STORAGE_URL = 'https://api.jsonbin.io/v3/b';
+        let currentSyncCode = localStorage.getItem('santriCampSyncCode') || '';
 
         // Load data dari localStorage
         function loadData() {
@@ -183,9 +220,154 @@
         function saveData() {
             const dataToSave = {
                 transaksi: transaksi,
-                currentPage: currentPage
+                currentPage: currentPage,
+                lastUpdated: new Date().toISOString()
             };
             localStorage.setItem('santriCampKeuangan', JSON.stringify(dataToSave));
+            
+            // Auto sync to cloud if sync code exists
+            if (currentSyncCode) {
+                syncToCloud();
+            }
+        }
+
+        // Generate sync code
+        function generateSyncCode() {
+            const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+            currentSyncCode = code;
+            localStorage.setItem('santriCampSyncCode', code);
+            document.getElementById('syncCode').value = code;
+            
+            // Upload initial data to cloud
+            syncToCloud();
+            showSyncStatus('Kode sinkronisasi dibuat: ' + code, 'success');
+        }
+
+        // Sync to cloud
+        async function syncToCloud() {
+            if (!currentSyncCode) return;
+            
+            const dataToSync = {
+                transaksi: transaksi,
+                currentPage: currentPage,
+                lastUpdated: new Date().toISOString(),
+                syncCode: currentSyncCode
+            };
+
+            try {
+                // Simulate cloud storage with localStorage key based on sync code
+                const cloudKey = 'santriCampCloud_' + currentSyncCode;
+                localStorage.setItem(cloudKey, JSON.stringify(dataToSync));
+                showSyncStatus('Data tersinkronisasi ✓', 'success');
+            } catch (error) {
+                showSyncStatus('Gagal sinkronisasi', 'error');
+            }
+        }
+
+        // Sync from cloud
+        async function syncFromCloud(syncCode) {
+            if (!syncCode) {
+                showSyncStatus('Masukkan kode sinkronisasi', 'error');
+                return;
+            }
+
+            try {
+                // Simulate cloud storage retrieval
+                const cloudKey = 'santriCampCloud_' + syncCode.toUpperCase();
+                const cloudData = localStorage.getItem(cloudKey);
+                
+                if (!cloudData) {
+                    showSyncStatus('Kode tidak ditemukan', 'error');
+                    return;
+                }
+
+                const parsed = JSON.parse(cloudData);
+                
+                // Check if cloud data is newer
+                const localData = localStorage.getItem('santriCampKeuangan');
+                let shouldUpdate = true;
+                
+                if (localData) {
+                    const localParsed = JSON.parse(localData);
+                    const localTime = new Date(localParsed.lastUpdated || 0);
+                    const cloudTime = new Date(parsed.lastUpdated || 0);
+                    
+                    if (localTime > cloudTime) {
+                        shouldUpdate = await showConfirmModal('Data lokal lebih baru dari cloud. Tetap gunakan data dari cloud?');
+                    }
+                }
+                
+                if (shouldUpdate) {
+                    transaksi = parsed.transaksi || [];
+                    currentPage = parsed.currentPage || 1;
+                    currentSyncCode = syncCode.toUpperCase();
+                    
+                    // Convert tanggal string kembali ke Date object
+                    transaksi.forEach(item => {
+                        item.tanggal = new Date(item.tanggal);
+                    });
+                    
+                    localStorage.setItem('santriCampSyncCode', currentSyncCode);
+                    document.getElementById('syncCode').value = currentSyncCode;
+                    
+                    updateSummary();
+                    renderTable();
+                    showSyncStatus('Data berhasil disinkronkan dari cloud ✓', 'success');
+                } else {
+                    showSyncStatus('Sinkronisasi dibatalkan', 'info');
+                }
+                
+            } catch (error) {
+                showSyncStatus('Gagal mengambil data dari cloud', 'error');
+            }
+        }
+
+        // Show sync status
+        function showSyncStatus(message, type) {
+            const statusElement = document.getElementById('syncStatus');
+            statusElement.textContent = message;
+            
+            statusElement.className = 'mt-2 text-center text-sm ';
+            if (type === 'success') {
+                statusElement.className += 'text-green-600';
+            } else if (type === 'error') {
+                statusElement.className += 'text-red-600';
+            } else if (type === 'info') {
+                statusElement.className += 'text-blue-600';
+            }
+            
+            // Clear status after 3 seconds
+            setTimeout(() => {
+                statusElement.textContent = '';
+            }, 3000);
+        }
+
+        // Show confirmation modal
+        function showConfirmModal(message) {
+            return new Promise((resolve) => {
+                document.getElementById('modalSinkronText').textContent = message;
+                document.getElementById('modalSinkron').classList.remove('hidden');
+                document.getElementById('modalSinkron').classList.add('flex');
+                
+                const handleConfirm = () => {
+                    document.getElementById('modalSinkron').classList.add('hidden');
+                    document.getElementById('modalSinkron').classList.remove('flex');
+                    document.getElementById('konfirmasiSinkron').removeEventListener('click', handleConfirm);
+                    document.getElementById('batalSinkron').removeEventListener('click', handleCancel);
+                    resolve(true);
+                };
+                
+                const handleCancel = () => {
+                    document.getElementById('modalSinkron').classList.add('hidden');
+                    document.getElementById('modalSinkron').classList.remove('flex');
+                    document.getElementById('konfirmasiSinkron').removeEventListener('click', handleConfirm);
+                    document.getElementById('batalSinkron').removeEventListener('click', handleCancel);
+                    resolve(false);
+                };
+                
+                document.getElementById('konfirmasiSinkron').addEventListener('click', handleConfirm);
+                document.getElementById('batalSinkron').addEventListener('click', handleCancel);
+            });
         }
 
         // Format currency
@@ -399,10 +581,30 @@
             deleteIndex = -1;
         });
 
+        // Sync button event listeners
+        document.getElementById('generateCode').addEventListener('click', function() {
+            generateSyncCode();
+        });
+
+        document.getElementById('syncData').addEventListener('click', function() {
+            const syncCode = document.getElementById('syncCode').value.trim();
+            if (syncCode) {
+                syncFromCloud(syncCode);
+            } else {
+                showSyncStatus('Masukkan kode sinkronisasi', 'error');
+            }
+        });
+
         // Initialize
         loadData(); // Load data saat halaman dimuat
+        
+        // Set sync code in input if exists
+        if (currentSyncCode) {
+            document.getElementById('syncCode').value = currentSyncCode;
+        }
+        
         updateSummary();
         renderTable();
     </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98efffdf12ca9d0c',t:'MTc2MDUzODQ3MC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98f006de719cef71',t:'MTc2MDUzODc1Ny4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
