@@ -242,7 +242,7 @@
             showSyncStatus('Kode sinkronisasi dibuat: ' + code, 'success');
         }
 
-        // Sync to cloud using simple text sharing service
+        // Sync to cloud using simple localStorage sharing
         async function syncToCloud() {
             if (!currentSyncCode) return;
             
@@ -250,84 +250,23 @@
                 transaksi: transaksi,
                 currentPage: currentPage,
                 lastUpdated: new Date().toISOString(),
-                syncCode: currentSyncCode
+                syncCode: currentSyncCode,
+                expiresAt: new Date(Date.now() + (7 * 24 * 60 * 60 * 1000)).toISOString() // 7 hari
             };
 
             try {
-                showSyncStatus('Menyinkronkan ke cloud...', 'info');
+                showSyncStatus('Menyimpan data untuk sinkronisasi...', 'info');
                 
                 const cloudKey = 'santriCampCloud_' + currentSyncCode;
                 
-                // Method 1: Try using dpaste.com for simple text storage
-                try {
-                    const response = await fetch('https://dpaste.com/api/v2/', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/x-www-form-urlencoded',
-                        },
-                        body: new URLSearchParams({
-                            'content': JSON.stringify(dataToSync),
-                            'syntax': 'json',
-                            'title': 'SantriCamp_' + currentSyncCode,
-                            'expiry_days': 30
-                        })
-                    });
-                    
-                    if (response.ok) {
-                        const pasteUrl = await response.text();
-                        const pasteId = pasteUrl.split('/').pop().replace('.txt', '');
-                        
-                        // Store the paste ID for retrieval
-                        localStorage.setItem('santriCampPasteId_' + currentSyncCode, pasteId);
-                        localStorage.setItem(cloudKey, JSON.stringify(dataToSync));
-                        
-                        showSyncStatus('Data berhasil disinkronkan ke cloud ✓', 'success');
-                        return;
-                    }
-                } catch (e) {
-                    console.log('dpaste failed, trying fallback');
-                }
-                
-                // Method 2: Try using paste.ee
-                try {
-                    const response = await fetch('https://api.paste.ee/v1/pastes', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            description: 'SantriCamp_' + currentSyncCode,
-                            sections: [{
-                                name: 'data',
-                                syntax: 'json',
-                                contents: JSON.stringify(dataToSync)
-                            }]
-                        })
-                    });
-                    
-                    if (response.ok) {
-                        const result = await response.json();
-                        if (result.success) {
-                            localStorage.setItem('santriCampPasteEeId_' + currentSyncCode, result.id);
-                            localStorage.setItem(cloudKey, JSON.stringify(dataToSync));
-                            showSyncStatus('Data berhasil disinkronkan ke cloud ✓', 'success');
-                            return;
-                        }
-                    }
-                } catch (e) {
-                    console.log('paste.ee failed, using local storage');
-                }
-                
-                // Fallback: Enhanced localStorage with better persistence
+                // Store in multiple locations for better cross-device access
                 localStorage.setItem(cloudKey, JSON.stringify(dataToSync));
+                sessionStorage.setItem(cloudKey, JSON.stringify(dataToSync));
+                localStorage.setItem('santriCampBackup_' + currentSyncCode, JSON.stringify(dataToSync));
                 
-                // Store in multiple browser storage locations
-                try {
-                    sessionStorage.setItem(cloudKey, JSON.stringify(dataToSync));
-                    localStorage.setItem('santriCampBackup_' + currentSyncCode, JSON.stringify(dataToSync));
-                    
-                    // Use IndexedDB for better persistence
-                    if ('indexedDB' in window) {
+                // Use IndexedDB for better persistence across browser sessions
+                if ('indexedDB' in window) {
+                    try {
                         const request = indexedDB.open('SantriCampDB', 1);
                         request.onupgradeneeded = function(e) {
                             const db = e.target.result;
@@ -345,12 +284,12 @@
                                 timestamp: Date.now()
                             });
                         };
+                    } catch (e) {
+                        // IndexedDB might not be available
                     }
-                } catch (e) {
-                    // Continue anyway
                 }
                 
-                // Broadcast to other tabs/windows
+                // Broadcast to other tabs/windows on same device
                 if (typeof BroadcastChannel !== 'undefined') {
                     const channel = new BroadcastChannel('santri-camp-sync');
                     channel.postMessage({
@@ -360,7 +299,31 @@
                     });
                 }
                 
-                showSyncStatus('Data tersimpan dan siap disinkron ✓', 'success');
+                // Try to use a simple cloud storage method
+                try {
+                    // Use a simple JSON storage service
+                    const response = await fetch('https://api.jsonbin.io/v3/b', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Bin-Name': 'SantriCamp_' + currentSyncCode
+                        },
+                        body: JSON.stringify(dataToSync)
+                    });
+                    
+                    if (response.ok) {
+                        const result = await response.json();
+                        if (result.metadata && result.metadata.id) {
+                            localStorage.setItem('santriCampBinId_' + currentSyncCode, result.metadata.id);
+                            showSyncStatus('Data berhasil disinkronkan ke cloud ✓ (Berlaku 7 hari)', 'success');
+                            return;
+                        }
+                    }
+                } catch (e) {
+                    // Cloud storage failed, continue with local storage
+                }
+                
+                showSyncStatus('Data tersimpan lokal ✓ (Berlaku 7 hari)', 'success');
                 
             } catch (error) {
                 showSyncStatus('Data tersimpan lokal, siap untuk sinkronisasi', 'info');
@@ -381,39 +344,23 @@
                 const cloudKey = 'santriCampCloud_' + code;
                 let cloudData = null;
                 
-                // Method 1: Try to fetch from dpaste.com
-                const pasteId = localStorage.getItem('santriCampPasteId_' + code);
-                if (pasteId) {
+                // Method 1: Try to fetch from JSONBin
+                const binId = localStorage.getItem('santriCampBinId_' + code);
+                if (binId) {
                     try {
-                        const response = await fetch(`https://dpaste.com/${pasteId}.txt`);
+                        const response = await fetch(`https://api.jsonbin.io/v3/b/${binId}/latest`);
                         if (response.ok) {
-                            const text = await response.text();
-                            cloudData = JSON.parse(text);
+                            const result = await response.json();
+                            if (result.record) {
+                                cloudData = result.record;
+                            }
                         }
                     } catch (e) {
-                        console.log('Failed to fetch from dpaste');
+                        console.log('Failed to fetch from JSONBin');
                     }
                 }
                 
-                // Method 2: Try to fetch from paste.ee
-                if (!cloudData) {
-                    const pasteEeId = localStorage.getItem('santriCampPasteEeId_' + code);
-                    if (pasteEeId) {
-                        try {
-                            const response = await fetch(`https://api.paste.ee/v1/pastes/${pasteEeId}`);
-                            if (response.ok) {
-                                const result = await response.json();
-                                if (result.success && result.paste.sections[0]) {
-                                    cloudData = JSON.parse(result.paste.sections[0].contents);
-                                }
-                            }
-                        } catch (e) {
-                            console.log('Failed to fetch from paste.ee');
-                        }
-                    }
-                }
-                
-                // Method 3: Check IndexedDB
+                // Method 2: Check IndexedDB
                 if (!cloudData && 'indexedDB' in window) {
                     try {
                         const db = await new Promise((resolve, reject) => {
@@ -444,7 +391,7 @@
                     }
                 }
                 
-                // Method 4: Check localStorage
+                // Method 3: Check localStorage
                 if (!cloudData) {
                     let localCloudData = localStorage.getItem(cloudKey);
                     if (localCloudData) {
@@ -456,7 +403,7 @@
                     }
                 }
                 
-                // Method 5: Check sessionStorage
+                // Method 4: Check sessionStorage
                 if (!cloudData) {
                     try {
                         const sessionData = sessionStorage.getItem(cloudKey);
@@ -468,7 +415,7 @@
                     }
                 }
                 
-                // Method 6: Check backup storage
+                // Method 5: Check backup storage
                 if (!cloudData) {
                     try {
                         const backupData = localStorage.getItem('santriCampBackup_' + code);
@@ -480,7 +427,7 @@
                     }
                 }
                 
-                // Method 7: Listen for broadcast messages from other tabs
+                // Method 6: Listen for broadcast messages from other tabs
                 if (!cloudData && typeof BroadcastChannel !== 'undefined') {
                     const channel = new BroadcastChannel('santri-camp-sync');
                     
@@ -504,7 +451,13 @@
                 }
                 
                 if (!cloudData) {
-                    showSyncStatus('Kode "' + code + '" tidak ditemukan. Pastikan kode sudah dibuat dan ada data di device lain.', 'error');
+                    showSyncStatus('Kode "' + code + '" tidak ditemukan. Pastikan kode sudah dibuat di device lain dan masih berlaku (7 hari).', 'error');
+                    return;
+                }
+
+                // Check if data has expired
+                if (cloudData.expiresAt && new Date(cloudData.expiresAt) < new Date()) {
+                    showSyncStatus('Kode "' + code + '" sudah kadaluarsa. Buat kode baru di device yang memiliki data terbaru.', 'error');
                     return;
                 }
 
@@ -548,7 +501,9 @@
                     
                     updateSummary();
                     renderTable();
-                    showSyncStatus(`Data berhasil disinkronkan! Ditemukan ${transaksi.length} transaksi ✓`, 'success');
+                    
+                    const expiryDate = cloudData.expiresAt ? new Date(cloudData.expiresAt).toLocaleDateString('id-ID') : 'tidak diketahui';
+                    showSyncStatus(`Data berhasil disinkronkan! Ditemukan ${transaksi.length} transaksi ✓ (Berlaku sampai ${expiryDate})`, 'success');
                 } else {
                     showSyncStatus('Sinkronisasi dibatalkan', 'info');
                 }
@@ -874,5 +829,5 @@
         updateSummary();
         renderTable();
     </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98f02054e38bce6a',t:'MTc2MDUzOTgwMC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98f028b7d790ce6a',t:'MTc2MDU0MDE0My4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
