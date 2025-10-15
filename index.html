@@ -149,190 +149,176 @@
   </div>
 
   <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-    import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { 
+    getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy 
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import { 
+    getAuth, signInAnonymously, onAuthStateChanged 
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-    const firebaseConfig = {
-      apiKey: "AIzaSyC91vIuvaZqKCRqHZaY1YcBRXN3fQL_vEs",
-      authDomain: "lpj-dks.firebaseapp.com",
-      projectId: "lpj-dks",
-      storageBucket: "lpj-dks.appspot.com",
-      messagingSenderId: "244348885616",
-      appId: "1:244348885616:web:225567e97bf5c8c80132b5",
-      measurementId: "G-8FXK3DHXM0"
+  const firebaseConfig = {
+    apiKey: "AIzaSyC91vIuvaZqKCRqHZaY1YcBRXN3fQL_vEs",
+    authDomain: "lpj-dks.firebaseapp.com",
+    projectId: "lpj-dks",
+    storageBucket: "lpj-dks.appspot.com",
+    messagingSenderId: "244348885616",
+    appId: "1:244348885616:web:225567e97bf5c8c80132b5",
+    measurementId: "G-8FXK3DHXM0"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  const auth = getAuth(app);
+
+  const ITEMS_PER_PAGE = 10;
+  let transaksi = [];
+  let currentPage = 1;
+  let unsubscribe;
+  let transaksiCollection;
+  let isReady = false;
+
+  function formatRupiah(angka) {
+    return new Intl.NumberFormat('id-ID', {
+      style: 'currency', currency: 'IDR', minimumFractionDigits: 0
+    }).format(angka);
+  }
+
+  function hitungTotalSaldo() {
+    const total = transaksi.reduce((acc, item) => item.type === 'pemasukan' ? acc + item.amount : acc - item.amount, 0);
+    const saldoElement = document.getElementById('totalSaldo');
+    saldoElement.textContent = formatRupiah(total);
+    saldoElement.className = total >= 0
+      ? 'text-2xl sm:text-3xl lg:text-4xl font-bold text-green-600'
+      : 'text-2xl sm:text-3xl lg:text-4xl font-bold text-red-600';
+  }
+
+  async function tambahTransaksi(type) {
+    if (!isReady || !auth.currentUser || !transaksiCollection) {
+      alert("Sedang menyambungkan ke server, mohon tunggu beberapa detik...");
+      return;
+    }
+
+    const isPemasukan = type === 'pemasukan';
+    const amountInput = document.getElementById(isPemasukan ? 'pemasukanAmount' : 'pengeluaranAmount');
+    const descInput = document.getElementById(isPemasukan ? 'pemasukanDesc' : 'pengeluaranDesc');
+    const amount = parseFloat(amountInput.value);
+    const desc = descInput.value.trim();
+
+    if (!amount || amount <= 0) return alert(`Masukkan jumlah ${type} yang valid!`);
+    if (!desc) return alert(`Masukkan keterangan ${type}!`);
+
+    const newTransaksi = {
+      id: Date.now(),
+      type,
+      amount,
+      description: desc,
+      date: new Date().toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })
     };
 
-    const appId = 'lpj-dks';
-    const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
-    const auth = getAuth(app);
-
-    const ITEMS_PER_PAGE = 10;
-    let transaksi = [];
-    let currentPage = 1;
-    let unsubscribe;
-    let transaksiCollection;
-
-    // --- Modal Konfirmasi ---
-    const confirmModal = document.getElementById('customConfirmModal');
-    const confirmOkBtn = document.getElementById('confirmOkBtn');
-    const confirmCancelBtn = document.getElementById('confirmCancelBtn');
-    const confirmMessage = document.getElementById('confirmMessage');
-
-    function showConfirm(message, onConfirm) {
-      confirmMessage.textContent = message;
-      confirmModal.classList.remove('hidden');
-      const okListener = () => {
-        hideConfirm();
-        onConfirm();
-        confirmOkBtn.removeEventListener('click', okListener);
-        confirmCancelBtn.removeEventListener('click', cancelListener);
-      };
-      const cancelListener = () => {
-        hideConfirm();
-        confirmOkBtn.removeEventListener('click', okListener);
-        confirmCancelBtn.removeEventListener('click', cancelListener);
-      };
-      confirmOkBtn.addEventListener('click', okListener);
-      confirmCancelBtn.addEventListener('click', cancelListener);
+    try {
+      await setDoc(doc(transaksiCollection, newTransaksi.id.toString()), newTransaksi);
+      amountInput.value = '';
+      descInput.value = '';
+    } catch (error) {
+      console.error("Firestore error:", error);
+      alert("Gagal menyimpan data. Pastikan koneksi internet stabil dan rules Firestore memperbolehkan penulisan.");
     }
-    function hideConfirm() {
-      confirmModal.classList.add('hidden');
+  }
+
+  window.tambahPemasukan = () => tambahTransaksi('pemasukan');
+  window.tambahPengeluaran = () => tambahTransaksi('pengeluaran');
+
+  window.hapusTransaksi = async function(id) {
+    if (!isReady || !auth.currentUser || !transaksiCollection) {
+      alert("Server belum siap. Coba lagi sebentar.");
+      return;
     }
 
-    function formatRupiah(angka) {
-      return new Intl.NumberFormat('id-ID', {
-        style: 'currency', currency: 'IDR', minimumFractionDigits: 0
-      }).format(angka);
+    if (!confirm("Yakin ingin menghapus transaksi ini?")) return;
+
+    try {
+      await deleteDoc(doc(transaksiCollection, id.toString()));
+    } catch (error) {
+      console.error("Firestore delete error:", error);
+      alert("Gagal menghapus data. Cek koneksi internet Anda.");
+    }
+  }
+
+  function updateTable() {
+    const tableBody = document.getElementById('transaksiTable');
+    const emptyState = document.getElementById('emptyState');
+    const pagination = document.getElementById('pagination');
+    const table = document.querySelector('table');
+    document.getElementById('totalTransaksi').textContent = transaksi.length;
+
+    if (transaksi.length === 0) {
+      tableBody.innerHTML = '';
+      emptyState.classList.remove('hidden');
+      table.classList.add('hidden');
+      pagination.classList.add('hidden');
+      return;
     }
 
-    function hitungTotalSaldo() {
-      const total = transaksi.reduce((acc, item) => item.type === 'pemasukan' ? acc + item.amount : acc - item.amount, 0);
-      const saldoElement = document.getElementById('totalSaldo');
-      saldoElement.textContent = formatRupiah(total);
-      saldoElement.className = total >= 0
-        ? 'text-2xl sm:text-3xl lg:text-4xl font-bold text-green-600'
-        : 'text-2xl sm:text-3xl lg:text-4xl font-bold text-red-600';
-    }
+    emptyState.classList.add('hidden');
+    table.classList.remove('hidden');
+    pagination.classList.remove('hidden');
 
-    async function tambahTransaksi(type) {
-      const isPemasukan = type === 'pemasukan';
-      const amountInput = document.getElementById(isPemasukan ? 'pemasukanAmount' : 'pengeluaranAmount');
-      const descInput = document.getElementById(isPemasukan ? 'pemasukanDesc' : 'pengeluaranDesc');
-      const amount = parseFloat(amountInput.value);
-      const desc = descInput.value.trim();
+    const totalPages = Math.ceil(transaksi.length / ITEMS_PER_PAGE) || 1;
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    const currentItems = transaksi.slice(startIndex, startIndex + ITEMS_PER_PAGE);
 
-      if (!amount || amount <= 0) return alert(`Masukkan jumlah ${type} yang valid!`);
-      if (!desc) return alert(`Masukkan keterangan ${type}!`);
+    document.getElementById('currentPage').textContent = currentPage;
+    document.getElementById('totalPages').textContent = totalPages;
+    document.getElementById('prevBtn').disabled = currentPage === 1;
+    document.getElementById('nextBtn').disabled = currentPage === totalPages;
 
-      const newTransaksi = {
-        id: Date.now(),
-        type,
-        amount,
-        description: desc,
-        date: new Date().toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })
-      };
+    tableBody.innerHTML = currentItems.map((item, index) => {
+      const displayNumber = startIndex + index + 1;
+      const pemasukanHTML = `<div class="text-green-600 font-medium">+${formatRupiah(item.amount)}</div><div class="text-gray-500 text-xs">${item.description}</div><div class="text-gray-400 text-xs">${item.date}</div>`;
+      const pengeluaranHTML = `<div class="text-red-600 font-medium">-${formatRupiah(item.amount)}</div><div class="text-gray-500 text-xs">${item.description}</div><div class="text-gray-400 text-xs">${item.date}</div>`;
+      return `
+        <tr class="hover:bg-gray-50 transition duration-150">
+          <td class="px-3 sm:px-6 py-3 text-xs sm:text-sm">${displayNumber}</td>
+          <td class="px-3 sm:px-6 py-3 text-xs sm:text-sm">${item.type === 'pemasukan' ? pemasukanHTML : '<span class="text-gray-400">-</span>'}</td>
+          <td class="px-3 sm:px-6 py-3 text-xs sm:text-sm hidden sm:table-cell">${item.type === 'pengeluaran' ? pengeluaranHTML : '<span class="text-gray-400">-</span>'}</td>
+          <td class="px-3 sm:px-6 py-3 text-xs sm:text-sm sm:hidden">${item.type === 'pemasukan' ? pemasukanHTML : pengeluaranHTML}</td>
+          <td class="px-3 sm:px-6 py-3 text-xs sm:text-sm">
+            <button onclick="window.hapusTransaksi('${item.id}')" class="text-red-600 hover:text-red-800 font-medium transition">🗑️ <span class="hidden sm:inline">Hapus</span></button>
+          </td>
+        </tr>`;
+    }).join('');
+  }
 
-      try {
-        await setDoc(doc(transaksiCollection, newTransaksi.id.toString()), newTransaksi);
-        amountInput.value = '';
-        descInput.value = '';
-      } catch (error) {
-        alert("Gagal menyimpan data. Cek koneksi internet Anda.");
-      }
-    }
-
-    window.tambahPemasukan = () => tambahTransaksi('pemasukan');
-    window.tambahPengeluaran = () => tambahTransaksi('pengeluaran');
-
-    window.hapusTransaksi = async function(id) {
-      showConfirm('Yakin ingin menghapus transaksi ini?', async () => {
-        try {
-          await deleteDoc(doc(transaksiCollection, id.toString()));
-        } catch (error) {
-          alert("Gagal menghapus data. Cek koneksi internet Anda.");
-        }
-      });
-    }
-
-    window.changePage = function(direction) {
+  // === Listen ke Firestore ===
+  function listenToData() {
+    if (unsubscribe) unsubscribe();
+    const q = query(transaksiCollection, orderBy('id', 'asc'));
+    unsubscribe = onSnapshot(q, snapshot => {
+      transaksi = snapshot.docs.map(doc => doc.data());
       const totalPages = Math.ceil(transaksi.length / ITEMS_PER_PAGE) || 1;
-      const newPage = currentPage + direction;
-      if (newPage >= 1 && newPage <= totalPages) {
-        currentPage = newPage;
-        updateTable();
-      }
-    }
-
-    function updateTable() {
-      const tableBody = document.getElementById('transaksiTable');
-      const emptyState = document.getElementById('emptyState');
-      const pagination = document.getElementById('pagination');
-      const table = document.querySelector('table');
-      document.getElementById('totalTransaksi').textContent = transaksi.length;
-
-      if (transaksi.length === 0) {
-        tableBody.innerHTML = '';
-        emptyState.classList.remove('hidden');
-        table.classList.add('hidden');
-        pagination.classList.add('hidden');
-        return;
-      }
-
-      emptyState.classList.add('hidden');
-      table.classList.remove('hidden');
-      pagination.classList.remove('hidden');
-
-      const totalPages = Math.ceil(transaksi.length / ITEMS_PER_PAGE) || 1;
-      const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-      const currentItems = transaksi.slice(startIndex, startIndex + ITEMS_PER_PAGE);
-
-      document.getElementById('currentPage').textContent = currentPage;
-      document.getElementById('totalPages').textContent = totalPages;
-      document.getElementById('prevBtn').disabled = currentPage === 1;
-      document.getElementById('nextBtn').disabled = currentPage === totalPages;
-
-      tableBody.innerHTML = currentItems.map((item, index) => {
-        const displayNumber = startIndex + index + 1;
-        const pemasukanHTML = `<div class="text-green-600 font-medium">+${formatRupiah(item.amount)}</div><div class="text-gray-500 text-xs">${item.description}</div><div class="text-gray-400 text-xs">${item.date}</div>`;
-        const pengeluaranHTML = `<div class="text-red-600 font-medium">-${formatRupiah(item.amount)}</div><div class="text-gray-500 text-xs">${item.description}</div><div class="text-gray-400 text-xs">${item.date}</div>`;
-        return `
-          <tr class="hover:bg-gray-50 transition duration-150">
-            <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-900">${displayNumber}</td>
-            <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">${item.type === 'pemasukan' ? pemasukanHTML : '<span class="text-gray-400">-</span>'}</td>
-            <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm hidden sm:table-cell">${item.type === 'pengeluaran' ? pengeluaranHTML : '<span class="text-gray-400">-</span>'}</td>
-            <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm sm:hidden">${item.type === 'pemasukan' ? pemasukanHTML : pengeluaranHTML}</td>
-            <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
-              <button onclick="window.hapusTransaksi('${item.id}')" class="text-red-600 hover:text-red-800 font-medium transition duration-150 text-xs sm:text-sm">
-                🗑️ <span class="hidden sm:inline">Hapus</span>
-              </button>
-            </td>
-          </tr>`;
-      }).join('');
-    }
-
-    // Listen Firestore
-    function listenToData() {
-      if (unsubscribe) unsubscribe();
-      const q = query(transaksiCollection, orderBy('id', 'asc'));
-      unsubscribe = onSnapshot(q, snapshot => {
-        transaksi = snapshot.docs.map(doc => doc.data());
-        const totalPages = Math.ceil(transaksi.length / ITEMS_PER_PAGE) || 1;
-        if (currentPage > totalPages) currentPage = totalPages;
-        updateTable();
-        hitungTotalSaldo();
-      });
-    }
-
-    onAuthStateChanged(auth, user => {
-      if (user) {
-        transaksiCollection = collection(db, 'artifacts', appId, 'public', 'data', 'transaksi');
-        listenToData();
-      }
+      if (currentPage > totalPages) currentPage = totalPages;
+      updateTable();
+      hitungTotalSaldo();
     });
+  }
 
-    signInAnonymously(auth).catch(() => alert("Tidak dapat terhubung ke server."));
-  </script>
+  // === Jalankan hanya jika sudah login anon ===
+  onAuthStateChanged(auth, user => {
+    if (user) {
+      transaksiCollection = collection(db, 'artifacts', 'lpj-dks', 'public', 'data', 'transaksi');
+      listenToData();
+      isReady = true;
+      console.log("✅ Terhubung ke Firestore sebagai user anonim:", user.uid);
+    }
+  });
+
+  signInAnonymously(auth)
+    .then(() => console.log("🔄 Login anonim berhasil"))
+    .catch(err => {
+      console.error("❌ Gagal login anonim:", err);
+      alert("Tidak dapat terhubung ke server. Coba reload halaman.");
+    });
+</script>
 </body>
 </html>
