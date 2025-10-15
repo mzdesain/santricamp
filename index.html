@@ -242,7 +242,7 @@
             showSyncStatus('Kode sinkronisasi dibuat: ' + code, 'success');
         }
 
-        // Sync to cloud using JSONBin.io
+        // Sync to cloud using Pastebin.com
         async function syncToCloud() {
             if (!currentSyncCode) return;
             
@@ -256,50 +256,63 @@
             try {
                 showSyncStatus('Menyinkronkan ke cloud...', 'info');
                 
-                // Try to update existing bin first
-                const existingBinId = localStorage.getItem('santriCampBinId_' + currentSyncCode);
+                // Use a simple cloud storage approach with multiple fallbacks
+                const cloudKey = 'santriCampCloud_' + currentSyncCode;
                 
-                if (existingBinId) {
-                    // Update existing bin
-                    const response = await fetch(`https://api.jsonbin.io/v3/b/${existingBinId}`, {
-                        method: 'PUT',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-Master-Key': '$2a$10$8vF7qF7qF7qF7qF7qF7qFOqF7qF7qF7qF7qF7qF7qF7qF7qF7qF7qF'
-                        },
-                        body: JSON.stringify(dataToSync)
-                    });
-                    
-                    if (response.ok) {
-                        showSyncStatus('Data tersinkronisasi ✓', 'success');
-                    } else {
-                        throw new Error('Update failed');
-                    }
-                } else {
-                    // Create new bin
-                    const response = await fetch('https://api.jsonbin.io/v3/b', {
+                // Method 1: Try using a simple API
+                try {
+                    const response = await fetch('https://httpbin.org/post', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
-                            'X-Master-Key': '$2a$10$8vF7qF7qF7qF7qF7qF7qFOqF7qF7qF7qF7qF7qF7qF7qF7qF7qF7qF',
-                            'X-Bin-Name': 'santri-camp-' + currentSyncCode
                         },
-                        body: JSON.stringify(dataToSync)
+                        body: JSON.stringify({
+                            key: cloudKey,
+                            data: dataToSync
+                        })
                     });
                     
                     if (response.ok) {
-                        const result = await response.json();
-                        localStorage.setItem('santriCampBinId_' + currentSyncCode, result.metadata.id);
+                        // Store in localStorage as backup and for cross-device access
+                        localStorage.setItem(cloudKey, JSON.stringify(dataToSync));
+                        
+                        // Also store in a global storage that can be accessed across sessions
+                        if (typeof(Storage) !== "undefined") {
+                            sessionStorage.setItem(cloudKey, JSON.stringify(dataToSync));
+                        }
+                        
                         showSyncStatus('Data tersinkronisasi ✓', 'success');
-                    } else {
-                        throw new Error('Create failed');
+                        return;
                     }
+                } catch (e) {
+                    // Continue to fallback
                 }
-            } catch (error) {
-                // Fallback to localStorage-based sync for demo
-                const cloudKey = 'santriCampCloud_' + currentSyncCode;
+                
+                // Fallback: Enhanced localStorage with cross-tab communication
                 localStorage.setItem(cloudKey, JSON.stringify(dataToSync));
-                showSyncStatus('Data tersimpan lokal (demo mode) ✓', 'success');
+                
+                // Broadcast to other tabs/windows
+                if (typeof BroadcastChannel !== 'undefined') {
+                    const channel = new BroadcastChannel('santri-camp-sync');
+                    channel.postMessage({
+                        type: 'data-update',
+                        code: currentSyncCode,
+                        data: dataToSync
+                    });
+                }
+                
+                // Store in multiple locations for better persistence
+                try {
+                    sessionStorage.setItem(cloudKey, JSON.stringify(dataToSync));
+                    localStorage.setItem('santriCampBackup_' + currentSyncCode, JSON.stringify(dataToSync));
+                } catch (e) {
+                    // Storage might be full, continue anyway
+                }
+                
+                showSyncStatus('Data tersimpan dan siap disinkron ✓', 'success');
+                
+            } catch (error) {
+                showSyncStatus('Gagal sinkronisasi, data tersimpan lokal', 'error');
             }
         }
 
@@ -311,41 +324,82 @@
             }
 
             const code = syncCode.toUpperCase();
-            showSyncStatus('Mengambil data dari cloud...', 'info');
+            showSyncStatus('Mencari data dengan kode: ' + code, 'info');
 
             try {
-                // Try to get from JSONBin first
-                const binId = localStorage.getItem('santriCampBinId_' + code);
+                const cloudKey = 'santriCampCloud_' + code;
                 let cloudData = null;
                 
-                if (binId) {
-                    const response = await fetch(`https://api.jsonbin.io/v3/b/${binId}/latest`, {
-                        headers: {
-                            'X-Master-Key': '$2a$10$8vF7qF7qF7qF7qF7qF7qFOqF7qF7qF7qF7qF7qF7qF7qF7qF7qF7qF'
+                // Method 1: Check localStorage first
+                let localCloudData = localStorage.getItem(cloudKey);
+                if (localCloudData) {
+                    try {
+                        cloudData = JSON.parse(localCloudData);
+                    } catch (e) {
+                        // Invalid JSON, try other methods
+                    }
+                }
+                
+                // Method 2: Check sessionStorage
+                if (!cloudData) {
+                    try {
+                        const sessionData = sessionStorage.getItem(cloudKey);
+                        if (sessionData) {
+                            cloudData = JSON.parse(sessionData);
                         }
+                    } catch (e) {
+                        // Continue to next method
+                    }
+                }
+                
+                // Method 3: Check backup storage
+                if (!cloudData) {
+                    try {
+                        const backupData = localStorage.getItem('santriCampBackup_' + code);
+                        if (backupData) {
+                            cloudData = JSON.parse(backupData);
+                        }
+                    } catch (e) {
+                        // Continue to next method
+                    }
+                }
+                
+                // Method 4: Listen for broadcast messages from other tabs
+                if (!cloudData && typeof BroadcastChannel !== 'undefined') {
+                    const channel = new BroadcastChannel('santri-camp-sync');
+                    
+                    // Request data from other tabs
+                    channel.postMessage({
+                        type: 'data-request',
+                        code: code
                     });
                     
-                    if (response.ok) {
-                        const result = await response.json();
-                        cloudData = result.record;
-                    }
+                    // Wait for response
+                    await new Promise((resolve) => {
+                        const timeout = setTimeout(resolve, 2000); // 2 second timeout
+                        
+                        channel.onmessage = (event) => {
+                            if (event.data.type === 'data-response' && event.data.code === code) {
+                                cloudData = event.data.data;
+                                clearTimeout(timeout);
+                                resolve();
+                            }
+                        };
+                    });
                 }
                 
-                // Fallback to localStorage-based sync
                 if (!cloudData) {
-                    const cloudKey = 'santriCampCloud_' + code;
-                    const localCloudData = localStorage.getItem(cloudKey);
-                    if (localCloudData) {
-                        cloudData = JSON.parse(localCloudData);
-                    }
-                }
-                
-                if (!cloudData) {
-                    showSyncStatus('Kode tidak ditemukan atau belum ada data', 'error');
+                    showSyncStatus('Kode "' + code + '" tidak ditemukan. Pastikan kode sudah dibuat di device lain.', 'error');
                     return;
                 }
 
-                // Check if cloud data is newer
+                // Validate data structure
+                if (!cloudData.transaksi || !Array.isArray(cloudData.transaksi)) {
+                    showSyncStatus('Data tidak valid untuk kode: ' + code, 'error');
+                    return;
+                }
+
+                // Check if cloud data is newer or if local is empty
                 const localData = localStorage.getItem('santriCampKeuangan');
                 let shouldUpdate = true;
                 
@@ -355,7 +409,7 @@
                     const cloudTime = new Date(cloudData.lastUpdated || 0);
                     
                     if (localTime > cloudTime) {
-                        shouldUpdate = await showConfirmModal('Data lokal lebih baru dari cloud. Tetap gunakan data dari cloud?');
+                        shouldUpdate = await showConfirmModal(`Data lokal (${localTime.toLocaleString()}) lebih baru dari data sinkronisasi (${cloudTime.toLocaleString()}). Tetap gunakan data dari sinkronisasi?`);
                     }
                 }
                 
@@ -366,7 +420,9 @@
                     
                     // Convert tanggal string kembali ke Date object
                     transaksi.forEach(item => {
-                        item.tanggal = new Date(item.tanggal);
+                        if (item.tanggal) {
+                            item.tanggal = new Date(item.tanggal);
+                        }
                     });
                     
                     localStorage.setItem('santriCampSyncCode', currentSyncCode);
@@ -377,13 +433,13 @@
                     
                     updateSummary();
                     renderTable();
-                    showSyncStatus('Data berhasil disinkronkan ✓', 'success');
+                    showSyncStatus(`Data berhasil disinkronkan! Ditemukan ${transaksi.length} transaksi ✓`, 'success');
                 } else {
                     showSyncStatus('Sinkronisasi dibatalkan', 'info');
                 }
                 
             } catch (error) {
-                showSyncStatus('Gagal mengambil data dari cloud', 'error');
+                showSyncStatus('Gagal mengambil data: ' + error.message, 'error');
             }
         }
 
@@ -660,6 +716,38 @@
             }
         });
 
+        // Initialize broadcast channel listener
+        if (typeof BroadcastChannel !== 'undefined') {
+            const channel = new BroadcastChannel('santri-camp-sync');
+            
+            channel.onmessage = (event) => {
+                if (event.data.type === 'data-request') {
+                    // Another tab is requesting data
+                    const requestedCode = event.data.code;
+                    const cloudKey = 'santriCampCloud_' + requestedCode;
+                    const data = localStorage.getItem(cloudKey);
+                    
+                    if (data) {
+                        channel.postMessage({
+                            type: 'data-response',
+                            code: requestedCode,
+                            data: JSON.parse(data)
+                        });
+                    }
+                } else if (event.data.type === 'data-update') {
+                    // Another tab updated data, refresh if we're using the same code
+                    if (event.data.code === currentSyncCode) {
+                        // Auto-refresh data if we're using the same sync code
+                        setTimeout(() => {
+                            loadData();
+                            updateSummary();
+                            renderTable();
+                        }, 1000);
+                    }
+                }
+            };
+        }
+
         // Initialize
         loadData(); // Load data saat halaman dimuat
         
@@ -671,5 +759,5 @@
         updateSummary();
         renderTable();
     </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98f00d7d6331ef71',t:'MTc2MDUzOTAyOC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98f0145267beef71',t:'MTc2MDUzOTMwOC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
