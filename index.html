@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PEMBAYARAN CAMP</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+    .loader {
+      border: 5px solid #f3f3f3;
+      border-top: 5px solid #3498db;
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
+
+  <!-- Main App -->
+  <div id="mainApp">
+    <div class="container mx-auto px-4 py-8 max-w-6xl">
+      <!-- Header -->
+      <div class="text-center mb-6 sm:mb-8">
+        <div class="flex justify-between items-center mb-4">
+          <div></div>
+          <h1 class="text-2xl sm:text-3xl lg:text-4xl font-bold text-gray-800">LPJ SANTRI CAMP</h1>
+          <button onclick="window.location.reload()" class="text-blue-600 hover:text-blue-800 text-sm font-medium">
+            🔄 Refresh
+          </button>
+        </div>
+        <p class="text-sm sm:text-base text-gray-600 px-4">
+          SMP-SMAS Tahfidz Al-Quran Wahdah Islamiyah Anabanua
+        </p>
+      </div>
+
+      <!-- Total Saldo Card -->
+      <div class="bg-white rounded-xl shadow-lg p-4 sm:p-6 mb-6 sm:mb-8 border border-gray-200">
+        <div class="text-center">
+          <h2 class="text-lg sm:text-xl font-semibold text-gray-700 mb-2">Total Saldo</h2>
+          <div id="totalSaldo" class="text-2xl sm:text-3xl lg:text-4xl font-bold text-green-600">Rp 0</div>
+        </div>
+      </div>
+
+      <!-- Input Form -->
+      <div class="bg-white rounded-xl shadow-lg p-4 sm:p-6 mb-8 border border-gray-200">
+        <h3 class="text-lg sm:text-xl font-semibold text-gray-800 mb-4">Tambah Transaksi</h3>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+          <!-- Pemasukan -->
+          <div class="space-y-3 sm:space-y-4">
+            <h4 class="font-medium text-green-600 flex items-center text-sm sm:text-base">
+              <span class="mr-2">📈</span> Pemasukan
+            </h4>
+            <input type="number" id="pemasukanAmount" placeholder="Jumlah pemasukan"
+              class="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+            <input type="text" id="pemasukanDesc" placeholder="Keterangan pemasukan"
+              class="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+            <button onclick="window.tambahPemasukan()"
+              class="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 sm:py-3 px-4 rounded-lg transition duration-200 text-sm sm:text-base">
+              Tambah Pemasukan
+            </button>
+          </div>
+
+          <!-- Pengeluaran -->
+          <div class="space-y-3 sm:space-y-4">
+            <h4 class="font-medium text-red-600 flex items-center text-sm sm:text-base">
+              <span class="mr-2">📉</span> Pengeluaran
+            </h4>
+            <input type="number" id="pengeluaranAmount" placeholder="Jumlah pengeluaran"
+              class="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent">
+            <input type="text" id="pengeluaranDesc" placeholder="Rincian pengeluaran"
+              class="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent">
+            <button onclick="window.tambahPengeluaran()"
+              class="w-full bg-red-600 hover:bg-red-700 text-white font-medium py-2 sm:py-3 px-4 rounded-lg transition duration-200 text-sm sm:text-base">
+              Tambah Pengeluaran
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tabel Transaksi -->
+      <div class="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+        <div class="px-4 sm:px-6 py-3 sm:py-4 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
+          <h3 class="text-lg sm:text-xl font-semibold text-gray-800">Riwayat Transaksi</h3>
+          <div class="text-sm text-gray-600">
+            Total: <span id="totalTransaksi">0</span> transaksi
+          </div>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full">
+            <thead class="bg-gray-100">
+              <tr>
+                <th class="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-700">No</th>
+                <th class="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-700">Pemasukan</th>
+                <th class="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-700 hidden sm:table-cell">Pengeluaran</th>
+                <th class="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-700 sm:hidden">Transaksi</th>
+                <th class="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-700">Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="transaksiTable" class="divide-y divide-gray-200"></tbody>
+          </table>
+        </div>
+
+        <div id="pagination" class="px-4 sm:px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-between items-center">
+          <div class="text-sm text-gray-600">
+            Hal <span id="currentPage">1</span> dari <span id="totalPages">1</span>
+          </div>
+          <div class="flex space-x-2">
+            <button id="prevBtn" onclick="window.changePage(-1)"
+              class="px-3 py-1 bg-gray-200 text-gray-600 rounded hover:bg-gray-300 transition duration-150 text-sm disabled:opacity-50">
+              ← Back
+            </button>
+            <button id="nextBtn" onclick="window.changePage(1)"
+              class="px-3 py-1 bg-gray-200 text-gray-600 rounded hover:bg-gray-300 transition duration-150 text-sm disabled:opacity-50">
+              Next →
+            </button>
+          </div>
+        </div>
+
+        <div id="emptyState" class="text-center py-8 sm:py-12 text-gray-500 px-4 hidden">
+          <div class="text-4xl sm:text-6xl mb-4">📊</div>
+          <p class="text-base sm:text-lg">Belum ada transaksi</p>
+          <p class="text-xs sm:text-sm">Mulai tambahkan pemasukan atau pengeluaran Anda</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Konfirmasi Modal -->
+  <div id="customConfirmModal" class="fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center hidden z-50">
+    <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm mx-4">
+      <h3 id="confirmTitle" class="text-lg font-bold text-gray-900 mb-4">Konfirmasi</h3>
+      <p id="confirmMessage" class="text-gray-700 mb-6">Apakah Anda yakin?</p>
+      <div class="flex justify-end space-x-4">
+        <button id="confirmCancelBtn" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300">Batal</button>
+        <button id="confirmOkBtn" class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">Yakin</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyC91vIuvaZqKCRqHZaY1YcBRXN3fQL_vEs",
+      authDomain: "lpj-dks.firebaseapp.com",
+      projectId: "lpj-dks",
+      storageBucket: "lpj-dks.appspot.com",
+      messagingSenderId: "244348885616",
+      appId: "1:244348885616:web:225567e97bf5c8c80132b5",
+      measurementId: "G-8FXK3DHXM0"
+    };
+
+    const appId = 'lpj-dks';
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
+
+    const ITEMS_PER_PAGE = 10;
+    let transaksi = [];
+    let currentPage = 1;
+    let unsubscribe;
+    let transaksiCollection;
+
+    // --- Modal Konfirmasi ---
+    const confirmModal = document.getElementById('customConfirmModal');
+    const confirmOkBtn = document.getElementById('confirmOkBtn');
+    const confirmCancelBtn = document.getElementById('confirmCancelBtn');
+    const confirmMessage = document.getElementById('confirmMessage');
+
+    function showConfirm(message, onConfirm) {
+      confirmMessage.textContent = message;
+      confirmModal.classList.remove('hidden');
+      const okListener = () => {
+        hideConfirm();
+        onConfirm();
+        confirmOkBtn.removeEventListener('click', okListener);
+        confirmCancelBtn.removeEventListener('click', cancelListener);
+      };
+      const cancelListener = () => {
+        hideConfirm();
+        confirmOkBtn.removeEventListener('click', okListener);
+        confirmCancelBtn.removeEventListener('click', cancelListener);
+      };
+      confirmOkBtn.addEventListener('click', okListener);
+      confirmCancelBtn.addEventListener('click', cancelListener);
+    }
+    function hideConfirm() {
+      confirmModal.classList.add('hidden');
+    }
+
+    function formatRupiah(angka) {
+      return new Intl.NumberFormat('id-ID', {
+        style: 'currency', currency: 'IDR', minimumFractionDigits: 0
+      }).format(angka);
+    }
+
+    function hitungTotalSaldo() {
+      const total = transaksi.reduce((acc, item) => item.type === 'pemasukan' ? acc + item.amount : acc - item.amount, 0);
+      const saldoElement = document.getElementById('totalSaldo');
+      saldoElement.textContent = formatRupiah(total);
+      saldoElement.className = total >= 0
+        ? 'text-2xl sm:text-3xl lg:text-4xl font-bold text-green-600'
+        : 'text-2xl sm:text-3xl lg:text-4xl font-bold text-red-600';
+    }
+
+    async function tambahTransaksi(type) {
+      const isPemasukan = type === 'pemasukan';
+      const amountInput = document.getElementById(isPemasukan ? 'pemasukanAmount' : 'pengeluaranAmount');
+      const descInput = document.getElementById(isPemasukan ? 'pemasukanDesc' : 'pengeluaranDesc');
+      const amount = parseFloat(amountInput.value);
+      const desc = descInput.value.trim();
+
+      if (!amount || amount <= 0) return alert(`Masukkan jumlah ${type} yang valid!`);
+      if (!desc) return alert(`Masukkan keterangan ${type}!`);
+
+      const newTransaksi = {
+        id: Date.now(),
+        type,
+        amount,
+        description: desc,
+        date: new Date().toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })
+      };
+
+      try {
+        await setDoc(doc(transaksiCollection, newTransaksi.id.toString()), newTransaksi);
+        amountInput.value = '';
+        descInput.value = '';
+      } catch (error) {
+        alert("Gagal menyimpan data. Cek koneksi internet Anda.");
+      }
+    }
+
+    window.tambahPemasukan = () => tambahTransaksi('pemasukan');
+    window.tambahPengeluaran = () => tambahTransaksi('pengeluaran');
+
+    window.hapusTransaksi = async function(id) {
+      showConfirm('Yakin ingin menghapus transaksi ini?', async () => {
+        try {
+          await deleteDoc(doc(transaksiCollection, id.toString()));
+        } catch (error) {
+          alert("Gagal menghapus data. Cek koneksi internet Anda.");
+        }
+      });
+    }
+
+    window.changePage = function(direction) {
+      const totalPages = Math.ceil(transaksi.length / ITEMS_PER_PAGE) || 1;
+      const newPage = currentPage + direction;
+      if (newPage >= 1 && newPage <= totalPages) {
+        currentPage = newPage;
+        updateTable();
+      }
+    }
+
+    function updateTable() {
+      const tableBody = document.getElementById('transaksiTable');
+      const emptyState = document.getElementById('emptyState');
+      const pagination = document.getElementById('pagination');
+      const table = document.querySelector('table');
+      document.getElementById('totalTransaksi').textContent = transaksi.length;
+
+      if (transaksi.length === 0) {
+        tableBody.innerHTML = '';
+        emptyState.classList.remove('hidden');
+        table.classList.add('hidden');
+        pagination.classList.add('hidden');
+        return;
+      }
+
+      emptyState.classList.add('hidden');
+      table.classList.remove('hidden');
+      pagination.classList.remove('hidden');
+
+      const totalPages = Math.ceil(transaksi.length / ITEMS_PER_PAGE) || 1;
+      const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+      const currentItems = transaksi.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+
+      document.getElementById('currentPage').textContent = currentPage;
+      document.getElementById('totalPages').textContent = totalPages;
+      document.getElementById('prevBtn').disabled = currentPage === 1;
+      document.getElementById('nextBtn').disabled = currentPage === totalPages;
+
+      tableBody.innerHTML = currentItems.map((item, index) => {
+        const displayNumber = startIndex + index + 1;
+        const pemasukanHTML = `<div class="text-green-600 font-medium">+${formatRupiah(item.amount)}</div><div class="text-gray-500 text-xs">${item.description}</div><div class="text-gray-400 text-xs">${item.date}</div>`;
+        const pengeluaranHTML = `<div class="text-red-600 font-medium">-${formatRupiah(item.amount)}</div><div class="text-gray-500 text-xs">${item.description}</div><div class="text-gray-400 text-xs">${item.date}</div>`;
+        return `
+          <tr class="hover:bg-gray-50 transition duration-150">
+            <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-900">${displayNumber}</td>
+            <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">${item.type === 'pemasukan' ? pemasukanHTML : '<span class="text-gray-400">-</span>'}</td>
+            <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm hidden sm:table-cell">${item.type === 'pengeluaran' ? pengeluaranHTML : '<span class="text-gray-400">-</span>'}</td>
+            <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm sm:hidden">${item.type === 'pemasukan' ? pemasukanHTML : pengeluaranHTML}</td>
+            <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
+              <button onclick="window.hapusTransaksi('${item.id}')" class="text-red-600 hover:text-red-800 font-medium transition duration-150 text-xs sm:text-sm">
+                🗑️ <span class="hidden sm:inline">Hapus</span>
+              </button>
+            </td>
+          </tr>`;
+      }).join('');
+    }
+
+    // Listen Firestore
+    function listenToData() {
+      if (unsubscribe) unsubscribe();
+      const q = query(transaksiCollection, orderBy('id', 'asc'));
+      unsubscribe = onSnapshot(q, snapshot => {
+        transaksi = snapshot.docs.map(doc => doc.data());
+        const totalPages = Math.ceil(transaksi.length / ITEMS_PER_PAGE) || 1;
+        if (currentPage > totalPages) currentPage = totalPages;
+        updateTable();
+        hitungTotalSaldo();
+      });
+    }
+
+    onAuthStateChanged(auth, user => {
+      if (user) {
+        transaksiCollection = collection(db, 'artifacts', appId, 'public', 'data', 'transaksi');
+        listenToData();
+      }
+    });
+
+    signInAnonymously(auth).catch(() => alert("Tidak dapat terhubung ke server."));
+  </script>
+</body>
+</html>
