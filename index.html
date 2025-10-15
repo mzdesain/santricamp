@@ -242,7 +242,7 @@
             showSyncStatus('Kode sinkronisasi dibuat: ' + code, 'success');
         }
 
-        // Sync to cloud using Pastebin.com
+        // Sync to cloud using simple text sharing service
         async function syncToCloud() {
             if (!currentSyncCode) return;
             
@@ -256,40 +256,99 @@
             try {
                 showSyncStatus('Menyinkronkan ke cloud...', 'info');
                 
-                // Use a simple cloud storage approach with multiple fallbacks
                 const cloudKey = 'santriCampCloud_' + currentSyncCode;
                 
-                // Method 1: Try using a simple API
+                // Method 1: Try using dpaste.com for simple text storage
                 try {
-                    const response = await fetch('https://httpbin.org/post', {
+                    const response = await fetch('https://dpaste.com/api/v2/', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                        },
+                        body: new URLSearchParams({
+                            'content': JSON.stringify(dataToSync),
+                            'syntax': 'json',
+                            'title': 'SantriCamp_' + currentSyncCode,
+                            'expiry_days': 30
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        const pasteUrl = await response.text();
+                        const pasteId = pasteUrl.split('/').pop().replace('.txt', '');
+                        
+                        // Store the paste ID for retrieval
+                        localStorage.setItem('santriCampPasteId_' + currentSyncCode, pasteId);
+                        localStorage.setItem(cloudKey, JSON.stringify(dataToSync));
+                        
+                        showSyncStatus('Data berhasil disinkronkan ke cloud ✓', 'success');
+                        return;
+                    }
+                } catch (e) {
+                    console.log('dpaste failed, trying fallback');
+                }
+                
+                // Method 2: Try using paste.ee
+                try {
+                    const response = await fetch('https://api.paste.ee/v1/pastes', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
                         },
                         body: JSON.stringify({
-                            key: cloudKey,
-                            data: dataToSync
+                            description: 'SantriCamp_' + currentSyncCode,
+                            sections: [{
+                                name: 'data',
+                                syntax: 'json',
+                                contents: JSON.stringify(dataToSync)
+                            }]
                         })
                     });
                     
                     if (response.ok) {
-                        // Store in localStorage as backup and for cross-device access
-                        localStorage.setItem(cloudKey, JSON.stringify(dataToSync));
-                        
-                        // Also store in a global storage that can be accessed across sessions
-                        if (typeof(Storage) !== "undefined") {
-                            sessionStorage.setItem(cloudKey, JSON.stringify(dataToSync));
+                        const result = await response.json();
+                        if (result.success) {
+                            localStorage.setItem('santriCampPasteEeId_' + currentSyncCode, result.id);
+                            localStorage.setItem(cloudKey, JSON.stringify(dataToSync));
+                            showSyncStatus('Data berhasil disinkronkan ke cloud ✓', 'success');
+                            return;
                         }
-                        
-                        showSyncStatus('Data tersinkronisasi ✓', 'success');
-                        return;
                     }
                 } catch (e) {
-                    // Continue to fallback
+                    console.log('paste.ee failed, using local storage');
                 }
                 
-                // Fallback: Enhanced localStorage with cross-tab communication
+                // Fallback: Enhanced localStorage with better persistence
                 localStorage.setItem(cloudKey, JSON.stringify(dataToSync));
+                
+                // Store in multiple browser storage locations
+                try {
+                    sessionStorage.setItem(cloudKey, JSON.stringify(dataToSync));
+                    localStorage.setItem('santriCampBackup_' + currentSyncCode, JSON.stringify(dataToSync));
+                    
+                    // Use IndexedDB for better persistence
+                    if ('indexedDB' in window) {
+                        const request = indexedDB.open('SantriCampDB', 1);
+                        request.onupgradeneeded = function(e) {
+                            const db = e.target.result;
+                            if (!db.objectStoreNames.contains('syncData')) {
+                                db.createObjectStore('syncData', { keyPath: 'code' });
+                            }
+                        };
+                        request.onsuccess = function(e) {
+                            const db = e.target.result;
+                            const transaction = db.transaction(['syncData'], 'readwrite');
+                            const store = transaction.objectStore('syncData');
+                            store.put({
+                                code: currentSyncCode,
+                                data: dataToSync,
+                                timestamp: Date.now()
+                            });
+                        };
+                    }
+                } catch (e) {
+                    // Continue anyway
+                }
                 
                 // Broadcast to other tabs/windows
                 if (typeof BroadcastChannel !== 'undefined') {
@@ -301,18 +360,10 @@
                     });
                 }
                 
-                // Store in multiple locations for better persistence
-                try {
-                    sessionStorage.setItem(cloudKey, JSON.stringify(dataToSync));
-                    localStorage.setItem('santriCampBackup_' + currentSyncCode, JSON.stringify(dataToSync));
-                } catch (e) {
-                    // Storage might be full, continue anyway
-                }
-                
                 showSyncStatus('Data tersimpan dan siap disinkron ✓', 'success');
                 
             } catch (error) {
-                showSyncStatus('Gagal sinkronisasi, data tersimpan lokal', 'error');
+                showSyncStatus('Data tersimpan lokal, siap untuk sinkronisasi', 'info');
             }
         }
 
@@ -330,17 +381,82 @@
                 const cloudKey = 'santriCampCloud_' + code;
                 let cloudData = null;
                 
-                // Method 1: Check localStorage first
-                let localCloudData = localStorage.getItem(cloudKey);
-                if (localCloudData) {
+                // Method 1: Try to fetch from dpaste.com
+                const pasteId = localStorage.getItem('santriCampPasteId_' + code);
+                if (pasteId) {
                     try {
-                        cloudData = JSON.parse(localCloudData);
+                        const response = await fetch(`https://dpaste.com/${pasteId}.txt`);
+                        if (response.ok) {
+                            const text = await response.text();
+                            cloudData = JSON.parse(text);
+                        }
                     } catch (e) {
-                        // Invalid JSON, try other methods
+                        console.log('Failed to fetch from dpaste');
                     }
                 }
                 
-                // Method 2: Check sessionStorage
+                // Method 2: Try to fetch from paste.ee
+                if (!cloudData) {
+                    const pasteEeId = localStorage.getItem('santriCampPasteEeId_' + code);
+                    if (pasteEeId) {
+                        try {
+                            const response = await fetch(`https://api.paste.ee/v1/pastes/${pasteEeId}`);
+                            if (response.ok) {
+                                const result = await response.json();
+                                if (result.success && result.paste.sections[0]) {
+                                    cloudData = JSON.parse(result.paste.sections[0].contents);
+                                }
+                            }
+                        } catch (e) {
+                            console.log('Failed to fetch from paste.ee');
+                        }
+                    }
+                }
+                
+                // Method 3: Check IndexedDB
+                if (!cloudData && 'indexedDB' in window) {
+                    try {
+                        const db = await new Promise((resolve, reject) => {
+                            const request = indexedDB.open('SantriCampDB', 1);
+                            request.onerror = () => reject(request.error);
+                            request.onsuccess = () => resolve(request.result);
+                            request.onupgradeneeded = function(e) {
+                                const db = e.target.result;
+                                if (!db.objectStoreNames.contains('syncData')) {
+                                    db.createObjectStore('syncData', { keyPath: 'code' });
+                                }
+                            };
+                        });
+                        
+                        const transaction = db.transaction(['syncData'], 'readonly');
+                        const store = transaction.objectStore('syncData');
+                        const result = await new Promise((resolve, reject) => {
+                            const request = store.get(code);
+                            request.onerror = () => reject(request.error);
+                            request.onsuccess = () => resolve(request.result);
+                        });
+                        
+                        if (result && result.data) {
+                            cloudData = result.data;
+                        }
+                    } catch (e) {
+                        console.log('IndexedDB failed');
+                    }
+                }
+                
+                // Method 4: Check localStorage
+                if (!cloudData) {
+                    let localCloudData = localStorage.getItem(cloudKey);
+                    if (localCloudData) {
+                        try {
+                            cloudData = JSON.parse(localCloudData);
+                        } catch (e) {
+                            // Invalid JSON, try other methods
+                        }
+                    }
+                }
+                
+                // Method 5: Check sessionStorage
                 if (!cloudData) {
                     try {
                         const sessionData = sessionStorage.getItem(cloudKey);
@@ -352,7 +468,7 @@
                     }
                 }
                 
-                // Method 3: Check backup storage
+                // Method 6: Check backup storage
                 if (!cloudData) {
                     try {
                         const backupData = localStorage.getItem('santriCampBackup_' + code);
@@ -364,7 +480,7 @@
                     }
                 }
                 
-                // Method 4: Listen for broadcast messages from other tabs
+                // Method 7: Listen for broadcast messages from other tabs
                 if (!cloudData && typeof BroadcastChannel !== 'undefined') {
                     const channel = new BroadcastChannel('santri-camp-sync');
                     
@@ -375,21 +491,20 @@
                     });
                     
                     // Wait for response
-                    await new Promise((resolve) => {
-                        const timeout = setTimeout(resolve, 2000); // 2 second timeout
+                    cloudData = await new Promise((resolve) => {
+                        const timeout = setTimeout(() => resolve(null), 3000); // 3 second timeout
                         
                         channel.onmessage = (event) => {
                             if (event.data.type === 'data-response' && event.data.code === code) {
-                                cloudData = event.data.data;
                                 clearTimeout(timeout);
-                                resolve();
+                                resolve(event.data.data);
                             }
                         };
                     });
                 }
                 
                 if (!cloudData) {
-                    showSyncStatus('Kode "' + code + '" tidak ditemukan. Pastikan kode sudah dibuat di device lain.', 'error');
+                    showSyncStatus('Kode "' + code + '" tidak ditemukan. Pastikan kode sudah dibuat dan ada data di device lain.', 'error');
                     return;
                 }
 
@@ -759,5 +874,5 @@
         updateSummary();
         renderTable();
     </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98f0145267beef71',t:'MTc2MDUzOTMwOC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98f02054e38bce6a',t:'MTc2MDUzOTgwMC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
